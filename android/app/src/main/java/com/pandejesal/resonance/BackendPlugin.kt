@@ -5,6 +5,8 @@ import android.os.Build
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class BackendPlugin(context: Context) {
 
@@ -75,10 +77,11 @@ class BackendPlugin(context: Context) {
                 if (success) {
                     Log.i(TAG, "Server started successfully on port $PORT")
 
-                    // Give the server a moment to bind the port
-                    // POCO C31 (Helio G35) may need slightly longer
-                    Thread.sleep(2500)
-                    onReady()
+                    if (waitForServerReady()) {
+                        onReady()
+                    } else {
+                        onError("Server started but did not become reachable on port $PORT")
+                    }
                 } else {
                     Log.e(TAG, "Server returned false (failed to bind or start)")
                     onError("Server failed to start. The port may be in use.")
@@ -100,6 +103,34 @@ class BackendPlugin(context: Context) {
             priority = Thread.MAX_PRIORITY // Give backend high priority on Helio G35
             start()
         }
+    }
+
+    private fun waitForServerReady(): Boolean {
+        repeat(30) { attempt ->
+            try {
+                val connection = (URL("http://127.0.0.1:$PORT/").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 500
+                    readTimeout = 500
+                    instanceFollowRedirects = false
+                }
+                val responseCode = connection.responseCode
+                connection.disconnect()
+                if (responseCode in 200..399) {
+                    Log.i(TAG, "Server health probe succeeded on attempt ${attempt + 1}")
+                    return true
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Server health probe attempt ${attempt + 1} failed: ${e.message}")
+            }
+            try {
+                Thread.sleep(200)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return false
     }
 
     fun stopBackend() {
