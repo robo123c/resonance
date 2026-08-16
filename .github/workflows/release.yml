@@ -3,15 +3,22 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g., v0.1.0)'
+        description: "Release tag (e.g., v0.1.0)"
         required: true
 
 env:
   CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-windows-tauri:
@@ -25,10 +32,12 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli
+        run: cargo install tauri-cli --locked
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -42,7 +51,7 @@ jobs:
 
       - name: Install Frontend Dependencies
         working-directory: frontend
-        run: npm install
+        run: npm ci --no-audit --no-fund
 
       - name: Build Frontend
         working-directory: frontend
@@ -79,7 +88,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libfuse2
@@ -95,10 +106,8 @@ jobs:
           restore-keys: linux-cargo-
 
       - name: Build Frontend
-        run: |
-          cd frontend
-          npm install
-          npm run build
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
 
       - name: Copy Frontend to Static
         run: cp -r frontend/dist static
@@ -144,7 +153,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -160,10 +171,8 @@ jobs:
           restore-keys: macos-cargo-
 
       - name: Build Frontend
-        run: |
-          cd frontend
-          npm install
-          npm run build
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
 
       - name: Copy Frontend to Static
         run: cp -r frontend/dist static
@@ -221,7 +230,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -234,10 +245,8 @@ jobs:
           restore-keys: android-cargo-
 
       - name: Build Frontend
-        run: |
-          cd frontend
-          npm install
-          npm run build
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
 
       - name: Build Backend for Android
         env:
@@ -268,7 +277,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.5'
+          gradle-version: "8.5"
 
       - name: Build Android APK
         run: |
@@ -304,7 +313,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -320,10 +331,8 @@ jobs:
           restore-keys: ios-cargo-
 
       - name: Build Frontend
-        run: |
-          cd frontend
-          npm install
-          npm run build
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
 
       - name: Build Backend for iOS
         run: |
@@ -373,7 +382,14 @@ jobs:
           path: frontend/ios/App/build/resonance-ios.ipa
 
   release:
-    needs: [build-windows-tauri, build-linux, build-macos, build-android-apk, build-ios-ipa]
+    needs:
+      [
+        build-windows-tauri,
+        build-linux,
+        build-macos,
+        build-android-apk,
+        build-ios-ipa,
+      ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
