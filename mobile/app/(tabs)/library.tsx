@@ -1,76 +1,42 @@
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Redirect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
+import { MaterialIcons } from "@expo/vector-icons";
+import { useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { TrackRow } from "@/components/resonance/track-row";
-import { ScreenContainer } from "@/components/screen-container";
-import { useResonanceSession } from "@/lib/resonance/session";
-import type { Track } from "@/lib/resonance/types";
+import { Card, COLORS, SectionHeader, TrackRow } from "@/components/apple-music-ui";
+import { albums, artists, playlists, recentlyPlayed, tracks } from "@/lib/apple-music/mock-data";
+import { useResonancePlayer } from "@/lib/resonance/player";
+
+const filters = ["Recently Added", "Artists", "Albums", "Songs", "Playlists", "Downloaded"];
 
 export default function LibraryScreen() {
-  const { api, status } = useResonanceSession();
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-
-  const load = useCallback(async (refresh = false) => {
-    if (!api) return;
-    if (refresh) setRefreshing(true);
-    else setLoading(true);
-    setError("");
-    try {
-      const response = await api.tracks(query, 1, 100);
-      setTracks(response.items);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not load tracks.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [api, query]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => void load(), 260);
-    return () => clearTimeout(timer);
-  }, [load]);
-
-  if (status === "disconnected") return <Redirect href="/connect" />;
-  if (status === "connected") return <Redirect href="/sign-in" />;
-
-  return (
-    <ScreenContainer style={styles.container}>
-      <FlatList
-        contentContainerStyle={styles.content}
-        data={tracks}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={
-          <>
-            <Text style={styles.title}>Library</Text>
-            <View style={styles.search}><MaterialIcons name="search" color="#A3B5AC" size={20} /><TextInput autoCapitalize="none" autoCorrect={false} onChangeText={setQuery} placeholder="Filter tracks, artists, albums" placeholderTextColor="#70877C" style={styles.input} value={query} /></View>
-            {loading ? <ActivityIndicator color="#5DE1B5" style={styles.loader} /> : null}
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            {!loading && !error && tracks.length === 0 ? <View style={styles.empty}><MaterialIcons name="queue-music" color="#5DE1B5" size={34} /><Text style={styles.emptyText}>No matching tracks</Text></View> : null}
-          </>
-        }
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor="#5DE1B5" />}
-        renderItem={({ item }) => <TrackRow track={item} queue={tracks} />}
-        showsVerticalScrollIndicator={false}
-      />
-    </ScreenContainer>
-  );
+  const { playTrack } = useResonancePlayer();
+  const [selected, setSelected] = useState(filters[0]);
+  const [favorites, setFavorites] = useState<string[]>(["t1", "t3"]);
+  const [downloaded] = useState<string[]>(["t1", "t5"]);
+  const play = (track = tracks[0], queue = tracks) => { void playTrack(track, queue); };
+  const list = useMemo(() => selected === "Downloaded" ? tracks.filter((track) => downloaded.includes(track.id)) : selected === "Songs" ? tracks : selected === "Recently Added" ? recentlyPlayed : tracks, [downloaded, selected]);
+  return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={styles.header}><View><Text style={styles.eyebrow}>YOUR MUSIC</Text><Text style={styles.title}>Library</Text></View><Pressable style={styles.edit}><Text style={styles.editText}>Edit</Text></Pressable></View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>{filters.map((filter) => <Pressable key={filter} onPress={() => setSelected(filter)} style={[styles.filter, selected === filter && styles.filterSelected]}><Text style={[styles.filterText, selected === filter && styles.filterTextSelected]}>{filter}</Text></Pressable>)}</ScrollView>{selected === "Artists" ? <><SectionHeader title="Artists" /><View style={styles.grid}>{artists.map((artist) => <View key={artist.id} style={styles.gridItem}><Card item={artist} width={145} /></View>)}</View></> : selected === "Albums" ? <><SectionHeader title="Albums" /><View style={styles.grid}>{albums.map((album) => <View key={album.id} style={styles.gridItem}><Card item={album} width={145} onPress={() => play(tracks.find((track) => track.album === album.title))} /></View>)}</View></> : selected === "Playlists" ? <><SectionHeader title="Playlists" /><View style={styles.grid}>{playlists.map((playlist) => <View key={playlist.id} style={styles.gridItem}><Card item={playlist} width={145} onPress={() => play()} /></View>)}</View></> : <><SectionHeader title={selected} action="Sort" /><View style={styles.listCard}>{list.map((track, index) => <View key={track.id} style={styles.trackWrap}><TrackRow track={track} index={index} showNumber={selected === "Songs"} onPress={() => play(track, list)} onMore={() => setFavorites((values) => values.includes(track.id) ? values.filter((id) => id !== track.id) : [...values, track.id])} />{favorites.includes(track.id) && <MaterialIcons name="favorite" size={15} color={COLORS.pink} style={styles.favorite} />}{downloaded.includes(track.id) && <MaterialIcons name="download-done" size={16} color="#46A37D" style={styles.downloaded} />}</View>)}</View><SectionHeader title="Quick actions" /><View style={styles.actionCard}><Pressable style={styles.actionRow}><MaterialIcons name="add" color={COLORS.pink} size={23} /><Text style={styles.actionText}>New playlist</Text><MaterialIcons name="chevron-right" color={COLORS.faint} size={22} /></Pressable><Pressable style={styles.actionRow}><MaterialIcons name="cloud-download" color={COLORS.pink} size={23} /><Text style={styles.actionText}>Downloaded music</Text><MaterialIcons name="chevron-right" color={COLORS.faint} size={22} /></Pressable></View></>}</ScrollView>;
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { paddingBottom: 132, paddingTop: 16 },
-  title: { color: "#ECF8F2", fontSize: 30, fontWeight: "800", letterSpacing: -0.7, paddingHorizontal: 18 },
-  search: { alignItems: "center", backgroundColor: "#14211D", borderColor: "#294238", borderRadius: 14, borderWidth: 1, flexDirection: "row", marginHorizontal: 18, marginTop: 18, minHeight: 50, paddingHorizontal: 14 },
-  input: { color: "#ECF8F2", flex: 1, fontSize: 15, marginLeft: 9, paddingVertical: 10 },
-  loader: { marginTop: 30 },
-  error: { color: "#FF8995", marginHorizontal: 18, marginTop: 20, textAlign: "center" },
-  empty: { alignItems: "center", backgroundColor: "#14211D", borderRadius: 18, marginHorizontal: 18, marginTop: 22, padding: 26 },
-  emptyText: { color: "#A3B5AC", fontSize: 14, marginTop: 9 },
+  content: { paddingBottom: 154, paddingTop: 18 },
+  header: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 20 },
+  eyebrow: { color: COLORS.pink, fontSize: 11, fontWeight: "800", letterSpacing: 1.2 },
+  title: { color: COLORS.ink, fontSize: 28, fontWeight: "800", letterSpacing: -0.8, marginTop: 4 },
+  edit: { paddingHorizontal: 4, paddingVertical: 7 },
+  editText: { color: COLORS.pink, fontSize: 15, fontWeight: "700" },
+  filters: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 2 },
+  filter: { backgroundColor: COLORS.surface, borderColor: COLORS.divider, borderRadius: 17, borderWidth: 1, marginRight: 8, paddingHorizontal: 13, paddingVertical: 8 },
+  filterSelected: { backgroundColor: COLORS.pink, borderColor: COLORS.pink },
+  filterText: { color: COLORS.ink, fontSize: 12, fontWeight: "700" },
+  filterTextSelected: { color: "#FFFFFF" },
+  listCard: { backgroundColor: COLORS.surface, borderRadius: 12, marginHorizontal: 12, overflow: "hidden" },
+  trackWrap: { position: "relative" },
+  favorite: { bottom: 15, position: "absolute", right: 53 },
+  downloaded: { bottom: 14, position: "absolute", right: 30 },
+  grid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 20 },
+  gridItem: { marginBottom: 24, width: "50%" },
+  actionCard: { backgroundColor: COLORS.surface, borderRadius: 12, marginHorizontal: 12, overflow: "hidden" },
+  actionRow: { alignItems: "center", borderBottomColor: COLORS.divider, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", minHeight: 55, paddingHorizontal: 17 },
+  actionText: { color: COLORS.ink, flex: 1, fontSize: 15, fontWeight: "600", marginLeft: 13 },
 });

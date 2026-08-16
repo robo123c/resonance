@@ -19,6 +19,10 @@ export interface Track {
   format: string;
   has_artwork: boolean;
   play_count: number;
+  artwork?: string;
+  genre?: string;
+  year?: number;
+  lyrics?: string[];
 }
 
 export interface TrackPage {

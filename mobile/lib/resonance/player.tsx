@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-
 import { useResonanceSession } from "./session";
 import type { Track } from "./types";
 
@@ -27,24 +26,35 @@ export function ResonancePlayerProvider({ children }: { children: ReactNode }) {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [queue, setQueue] = useState<Track[]>([]);
   const [queueIndex, setQueueIndex] = useState(-1);
+  const [mockPlaying, setMockPlaying] = useState(false);
+  const [mockPosition, setMockPosition] = useState(0);
+  const [mockDuration, setMockDuration] = useState(0);
 
-  useEffect(() => {
-    void setAudioModeAsync({ playsInSilentMode: true });
-  }, []);
-
+  useEffect(() => { void setAudioModeAsync({ playsInSilentMode: true }); }, []);
   useEffect(() => () => player.remove(), [player]);
+  useEffect(() => {
+    if (api || !mockPlaying || !currentTrack) return;
+    const timer = setInterval(() => setMockPosition((value) => {
+      const next = value + 1;
+      return next >= mockDuration ? 0 : next;
+    }), 1000);
+    return () => clearInterval(timer);
+  }, [api, currentTrack, mockDuration, mockPlaying]);
 
   const start = useCallback(async (track: Track, nextQueue: Track[], index: number) => {
-    if (!api || !token) throw new Error("Sign in to start playback.");
-    player.replace({
-      uri: api.streamUrl(track.id),
-      headers: api.authorizationHeaders(),
-    });
-    player.play();
+    if (api && token) {
+      player.replace({ uri: api.streamUrl(track.id), headers: api.authorizationHeaders() });
+      player.play();
+      setMockPlaying(false);
+      void api.recordPlay(track.id).catch(() => undefined);
+    } else {
+      setMockDuration(Math.max(1, Math.round(track.duration_ms / 1000)));
+      setMockPosition(0);
+      setMockPlaying(true);
+    }
     setCurrentTrack(track);
     setQueue(nextQueue);
     setQueueIndex(index);
-    void api.recordPlay(track.id).catch(() => undefined);
   }, [api, player, token]);
 
   const playTrack = useCallback(async (track: Track, suppliedQueue?: Track[]) => {
@@ -55,45 +65,30 @@ export function ResonancePlayerProvider({ children }: { children: ReactNode }) {
 
   const toggle = useCallback(() => {
     if (!currentTrack) return;
-    if (status.playing) player.pause();
-    else player.play();
-  }, [currentTrack, player, status.playing]);
+    if (api) {
+      if (status.playing) player.pause(); else player.play();
+    } else setMockPlaying((value) => !value);
+  }, [api, currentTrack, player, status.playing]);
 
   const next = useCallback(async () => {
     if (!queue.length) return;
-    const index = Math.min(queueIndex + 1, queue.length - 1);
-    if (index === queueIndex) return;
+    const index = queueIndex + 1 >= queue.length ? 0 : queueIndex + 1;
     await start(queue[index], queue, index);
   }, [queue, queueIndex, start]);
 
   const previous = useCallback(async () => {
     if (!queue.length) return;
-    const index = Math.max(queueIndex - 1, 0);
-    if (index === queueIndex) {
-      await player.seekTo(0);
-      return;
-    }
+    if (!api && mockPosition > 3) { setMockPosition(0); return; }
+    const index = queueIndex - 1 < 0 ? queue.length - 1 : queueIndex - 1;
     await start(queue[index], queue, index);
-  }, [player, queue, queueIndex, start]);
+  }, [api, mockPosition, queue, queueIndex, start]);
 
   const seek = useCallback(async (seconds: number) => {
-    await player.seekTo(Math.max(0, seconds));
-  }, [player]);
+    if (api) await player.seekTo(Math.max(0, seconds));
+    else setMockPosition(Math.max(0, Math.min(seconds, mockDuration)));
+  }, [api, mockDuration, player]);
 
-  const value = useMemo<PlayerValue>(() => ({
-    currentTrack,
-    queue,
-    queueIndex,
-    isPlaying: status.playing,
-    position: status.currentTime ?? 0,
-    duration: status.duration ?? 0,
-    playTrack,
-    toggle,
-    next,
-    previous,
-    seek,
-  }), [currentTrack, next, playTrack, previous, queue, queueIndex, seek, status.currentTime, status.duration, status.playing, toggle]);
-
+  const value = useMemo<PlayerValue>(() => ({ currentTrack, queue, queueIndex, isPlaying: api ? status.playing : mockPlaying, position: api ? status.currentTime ?? 0 : mockPosition, duration: api ? (status.duration ?? (currentTrack ? currentTrack.duration_ms / 1000 : 0)) : mockDuration, playTrack, toggle, next, previous, seek }), [api, currentTrack, mockDuration, mockPlaying, mockPosition, next, playTrack, previous, queue, queueIndex, seek, status.currentTime, status.duration, status.playing, toggle]);
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
 }
 
