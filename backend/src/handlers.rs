@@ -72,17 +72,26 @@ pub async fn delete_library(data: web::Data<AppState>, path: web::Path<String>, 
     if let Err(e) = require_auth(&req) { return e; }
     let id = path.into_inner();
 
-    let lib = sqlx::query_as::<_, Library>("SELECT * FROM libraries WHERE id = ?")
+    let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM libraries WHERE id = ?")
         .bind(&id)
-        .fetch_one(&data.db)
+        .fetch_optional(&data.db)
         .await;
 
-    if let Ok(lib) = lib {
-        if std::fs::remove_dir_all(&lib.path).is_err() {
-            // Directory may not exist or may be in use; continue with DB cleanup
+    match exists {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({"error": "Library not found"}));
+        }
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": e.to_string()}));
         }
     }
 
+    // Library removal only detaches the library from Resonance. The configured
+    // directory belongs to the user and must never be deleted by an API request.
+    // Foreign-key cascades remove the library's indexed metadata below.
     let result = sqlx::query("DELETE FROM libraries WHERE id = ?")
         .bind(&id)
         .execute(&data.db)
